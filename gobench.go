@@ -3,6 +3,8 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/tls"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -10,13 +12,16 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/valyala/fasthttp"
+	clientauthv1beta1 "k8s.io/client-go/pkg/apis/clientauthentication/v1beta1"
 )
 
 var (
@@ -30,6 +35,7 @@ var (
 	writeTimeout     int
 	readTimeout      int
 	authHeader       string
+	useK8sToken      bool
 )
 
 type Configuration struct {
@@ -40,6 +46,7 @@ type Configuration struct {
 	period     int64
 	keepAlive  bool
 	authHeader string
+	useK8sToken bool
 
 	myClient fasthttp.Client
 }
@@ -89,6 +96,7 @@ func init() {
 	flag.IntVar(&writeTimeout, "tw", 5000, "Write timeout (in milliseconds)")
 	flag.IntVar(&readTimeout, "tr", 5000, "Read timeout (in milliseconds)")
 	flag.StringVar(&authHeader, "auth", "", "Authorization header")
+	flag.BoolVar(&useK8sToken, "k8s", true, "Use aws-iam-authenticator token as authHeader value")
 }
 
 func printResults(results map[int]*Result, startTime time.Time) {
@@ -175,7 +183,9 @@ func NewConfiguration() *Configuration {
 		postData:   nil,
 		keepAlive:  keepAlive,
 		requests:   int64((1 << 63) - 1),
-		authHeader: authHeader}
+		authHeader: authHeader,
+		useK8sToken: useK8sToken,
+	}
 
 	if period != -1 {
 		configuration.period = period
@@ -231,6 +241,7 @@ func NewConfiguration() *Configuration {
 	configuration.myClient.ReadTimeout = time.Duration(readTimeout) * time.Millisecond
 	configuration.myClient.WriteTimeout = time.Duration(writeTimeout) * time.Millisecond
 	configuration.myClient.MaxConnsPerHost = clients
+	configuration.myClient.TLSConfig = &tls.Config{InsecureSkipVerify: true}
 
 	configuration.myClient.Dial = MyDialer()
 
@@ -266,7 +277,23 @@ func client(configuration *Configuration, result *Result, done *sync.WaitGroup) 
 			}
 
 			if len(configuration.authHeader) > 0 {
-				req.Header.Set("Authorization", configuration.authHeader)
+				var token string
+				if configuration.useK8sToken {
+					cmd := exec.Command("aws-iam-authenticator", "token", "--cluster-id", "eks-2021090810-onionq2aa7uq")
+					stdout, err := cmd.Output()
+					if err != nil {
+						log.Fatal(err)
+					}
+
+					execCreds := clientauthv1beta1.ExecCredential{}
+					if err = json.Unmarshal(stdout, &execCreds); err != nil {
+						log.Fatal(err)
+					}
+					token = execCreds.Status.Token
+				} else {
+					token = uuid.Must(uuid.NewRandom()).String()
+				}
+				req.Header.Set("Authorization", configuration.authHeader + token)
 			}
 
 			req.SetBody(configuration.postData)
@@ -279,6 +306,7 @@ func client(configuration *Configuration, result *Result, done *sync.WaitGroup) 
 			fasthttp.ReleaseResponse(resp)
 
 			if err != nil {
+				log.Println(err)
 				result.networkFailed++
 				continue
 			}
