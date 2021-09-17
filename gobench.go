@@ -124,6 +124,7 @@ func printResults(results map[int]*Result, startTime time.Time) {
 	fmt.Printf("Network failed:                 %10d hits\n", networkFailed)
 	fmt.Printf("Bad requests failed (!2xx):     %10d hits\n", badFailed)
 	fmt.Printf("Successful requests rate:       %10d hits/sec\n", success/elapsed)
+	fmt.Printf("Bad requests rate:              %10d hits/sec\n", badFailed/elapsed)
 	fmt.Printf("Read throughput:                %10d bytes/sec\n", readThroughput/elapsed)
 	fmt.Printf("Write throughput:               %10d bytes/sec\n", writeThroughput/elapsed)
 	fmt.Printf("Test time:                      %10d sec\n", elapsed)
