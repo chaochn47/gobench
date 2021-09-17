@@ -349,18 +349,21 @@ func main() {
 
 	fmt.Printf("Dispatching %d clients\n", clients)
 
-	done.Add(clients + 1)
-	for i := 0; i < clients; i++ {
+	done.Add(clients)
+
+	halfClients := clients / 2
+	for i := 0; i < halfClients; i++ {
 		result := &Result{}
 		results[i] = result
 		go client(configuration, result, &done)
-
 	}
 	cfg2 := NewConfiguration()
 	cfg2.useK8sToken = true
-	result := &Result{}
-	results[clients] = result
-	go client(cfg2, result, &done)
+	for i := 0; i < clients - halfClients; i++ {
+		result := &Result{}
+		results[halfClients + i] = result
+		go client(cfg2, result, &done)
+	}
 
 	fmt.Println("Waiting for results...")
 	done.Wait()
